@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  comfyui:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount the specific huggingface snapshot directly into ComfyUI's unet models folder
+      - /Users/jane/.cache/huggingface/hub/models--gpustack--stable-diffusion-v3-5-large-GGUF/snapshots/937e5a94fa7679e9a58916217549d07be49b968b:/comfyui/models/unet/gguf:ro
+      # We also mount the full cache in case symlinks need absolute paths, though they are usually relative
+      - /Users/jane/.cache/huggingface:/root/.cache/huggingface:ro
+    ports:
+      - "8188:8188"
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188 --cpu
+
+  sidecar:
+    build:
+      context: ./sidecar
+    ports:
+      - "8080:8080"
+    environment:
+      - TARGET_URL=http://comfyui:8188
