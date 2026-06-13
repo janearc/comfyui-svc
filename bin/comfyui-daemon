@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR"
+
+echo "Building Go sidecar..."
+cd sidecar
+go build -o ../bin/sidecar
+cd ..
+
+if [ ! -d "src/ComfyUI" ]; then
+    echo "Cloning ComfyUI..."
+    git clone https://github.com/comfyanonymous/ComfyUI.git src/ComfyUI
+fi
+
+cd src/ComfyUI
+
+if [ ! -d ".venv" ]; then
+    echo "Creating uv venv and installing dependencies..."
+    uv venv
+    # Native PyTorch on macOS supports Metal (MPS) out of the box via standard PyPI
+    uv pip install torch torchvision torchaudio
+    uv pip install -r requirements.txt
+fi
+
+if [ ! -d "custom_nodes/ComfyUI-GGUF" ]; then
+    echo "Cloning ComfyUI-GGUF..."
+    git clone https://github.com/city96/ComfyUI-GGUF.git custom_nodes/ComfyUI-GGUF
+    uv pip install -r custom_nodes/ComfyUI-GGUF/requirements.txt
+fi
+
+# Configure ComfyUI to read the HuggingFace cache directly
+# Because this is native Mac, the symlinks in the snapshot dir resolve natively to blobs!
+cat <<EOF > extra_model_paths.yaml
+comfyui:
+    unet:
+        - /Users/jane/.cache/huggingface/hub/models--gpustack--stable-diffusion-v3-5-large-GGUF/snapshots/937e5a94fa7679e9a58916217549d07be49b968b
+EOF
+
+echo "Starting ComfyUI on MPS..."
+# We explicitly set --port 8188 and listen locally so Traefik/Sidecar handles ingress
+.venv/bin/python main.py --listen 127.0.0.1 --port 8188 &
+COMFY_PID=$!
+
+echo "Starting Go sidecar (exposing :8080)..."
+export TARGET_URL=http://127.0.0.1:8188
+"$DIR/bin/sidecar" &
+SIDECAR_PID=$!
+
+# Cleanup trap so Delightd can cleanly tear down the service
+trap "kill $COMFY_PID $SIDECAR_PID" SIGINT SIGTERM EXIT
+
+wait
