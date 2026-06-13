@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR"
+
+echo "=== 1. Checking Static Environment ==="
+
+# Check model
+MODEL_PATH="/Users/jane/.cache/huggingface/hub/models--gpustack--stable-diffusion-v3-5-large-GGUF/snapshots/937e5a94fa7679e9a58916217549d07be49b968b"
+if [ ! -d "$MODEL_PATH" ]; then
+    echo "❌ ERROR: HuggingFace model snapshot not found at $MODEL_PATH"
+    exit 1
+fi
+echo "✅ HuggingFace model cache located."
+
+# Check venv
+if [ ! -d "src/ComfyUI/.venv" ]; then
+    echo "❌ ERROR: Virtual environment not found. Please run bin/comfyui-daemon to initialize."
+    exit 1
+fi
+
+# Check PyTorch MPS
+echo "Testing PyTorch Metal (MPS) support..."
+src/ComfyUI/.venv/bin/python -c "
+import sys
+try:
+    import torch
+    if not torch.backends.mps.is_available():
+        print('❌ ERROR: PyTorch MPS backend is NOT available. This will run on CPU and melt the laptop.')
+        sys.exit(1)
+    print('✅ PyTorch MPS backend is active.')
+except ImportError:
+    print('❌ ERROR: PyTorch is not installed in the venv.')
+    sys.exit(1)
+"
+
+# Check Go sidecar
+if [ ! -f "bin/sidecar" ]; then
+    echo "❌ ERROR: Go sidecar binary not found in bin/sidecar."
+    exit 1
+fi
+echo "✅ Go sidecar binary is present."
+
+echo ""
+echo "=== 2. Integration Testing Daemon APIs ==="
+echo "Starting comfyui-daemon in the background..."
+
+# Launch daemon
+./bin/comfyui-daemon > /dev/null 2>&1 &
+DAEMON_PID=$!
+
+# Ensure we cleanup if the script exits
+trap "echo 'Cleaning up daemon...'; kill $DAEMON_PID 2>/dev/null || true" EXIT
+
+echo "Waiting for Go sidecar to come online..."
+RETRIES=30
+for i in $(seq 1 $RETRIES); do
+    if curl -s -f http://127.0.0.1:8080/health > /dev/null; then
+        echo "✅ Go sidecar is routing traffic."
+        break
+    fi
+    sleep 1
+    if [ "$i" -eq "$RETRIES" ]; then
+        echo "❌ ERROR: Sidecar failed to come online."
+        exit 1
+    fi
+done
+
+echo "Waiting for ComfyUI core to boot and serve API..."
+for i in $(seq 1 $RETRIES); do
+    if curl -s -f http://127.0.0.1:8188/system_stats > /dev/null; then
+        echo "✅ ComfyUI is fully booted and responding to API requests."
+        break
+    fi
+    sleep 2
+    if [ "$i" -eq "$RETRIES" ]; then
+        echo "❌ ERROR: ComfyUI failed to expose API."
+        exit 1
+    fi
+done
+
+echo ""
+echo "🎉 All health checks passed! The local Metal-accelerated ComfyUI environment is perfectly sane."
