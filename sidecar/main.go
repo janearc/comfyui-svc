@@ -6,7 +6,26 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sync/atomic"
+	"time"
 )
+
+var comfyuiHealthy int32 = 0
+
+func monitorComfyUI(targetStr string) {
+	for {
+		resp, err := http.Get(targetStr + "/system_stats")
+		if err == nil && resp.StatusCode == 200 {
+			atomic.StoreInt32(&comfyuiHealthy, 1)
+		} else {
+			atomic.StoreInt32(&comfyuiHealthy, 0)
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
 
 func main() {
 	targetStr := os.Getenv("TARGET_URL")
@@ -19,20 +38,27 @@ func main() {
 		panic(err)
 	}
 
+	go monitorComfyUI(targetStr)
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if atomic.LoadInt32(&comfyuiHealthy) == 1 {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"ok"}`))
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"error", "reason":"ComfyUI API unreachable"}`))
+		}
 	})
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("# HELP comfyui_up Whether ComfyUI is up\n# TYPE comfyui_up gauge\ncomfyui_up 1\n"))
+		fmt.Fprintf(w, "# HELP comfyui_up Whether ComfyUI is up\n# TYPE comfyui_up gauge\ncomfyui_up %d\n", atomic.LoadInt32(&comfyuiHealthy))
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -9,7 +9,8 @@ echo "=== 1. Checking Static Environment ==="
 # Check model
 MODEL_PATH="/Users/jane/.cache/huggingface/hub/models--gpustack--stable-diffusion-v3-5-large-GGUF/snapshots/937e5a94fa7679e9a58916217549d07be49b968b"
 if [ ! -d "$MODEL_PATH" ]; then
-    echo "❌ ERROR: HuggingFace model snapshot not found at $MODEL_PATH"
+    echo "CRITICAL: Stable Diffusion v3.5 GGUF snapshot not found in HuggingFace cache."
+    echo "Please run 'huggingface-cli download gpustack/stable-diffusion-v3-5-large-GGUF' to hydrate the cache before launching."
     exit 1
 fi
 echo "✅ HuggingFace model cache located."
