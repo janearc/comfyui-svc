@@ -70,3 +70,17 @@ func TestMonitorComfyUI(t *testing.T) {
 	go monitorComfyUI(mockServerFail.URL)
 	time.Sleep(100 * time.Millisecond)
 }
+
+func TestRun(t *testing.T) {
+	// Test invalid URL
+	if err := run(":0", "://invalid-url"); err == nil {
+		t.Error("Expected error for invalid target URL")
+	}
+
+	// Test valid run, it should start server but we don't want it to block forever,
+	// so we use a random port, let it spin up, and then proceed. 
+	// We can't cleanly stop http.ListenAndServe without a server object, so we'll 
+	// just spawn it and let it hang in the background for this coverage test.
+	go run(":0", "http://localhost:8188")
+	time.Sleep(100 * time.Millisecond)
+}

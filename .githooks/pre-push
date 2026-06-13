@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -e
+
+echo "Running pre-push coverage check..."
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR/sidecar"
+
+# Run tests and get coverage
+OUTPUT=$(go test -cover ./...)
+echo "$OUTPUT"
+
+COVERAGE=$(echo "$OUTPUT" | awk '{print $4}' | sed 's/%//')
+
+if [ -z "$COVERAGE" ] || [ "$COVERAGE" = "[no" ]; then
+    echo "❌ ERROR: Could not determine coverage or no test files."
+    exit 1
+fi
+
+if ( $(echo "$COVERAGE < 80.0" | bc -l) ); then
+    echo "❌ ERROR: Coverage ($COVERAGE%) is below the 80% threshold. Push mathematically blocked."
+    exit 1
+fi
+
+echo "✅ Coverage ($COVERAGE%) passes 80% threshold."
+exit 0

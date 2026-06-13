@@ -27,21 +27,7 @@ func monitorComfyUI(targetStr string) {
 	}
 }
 
-func main() {
-	targetStr := os.Getenv("TARGET_URL")
-	if targetStr == "" {
-		targetStr = "http://localhost:8188"
-	}
-
-	targetURL, err := url.Parse(targetStr)
-	if err != nil {
-		panic(err)
-	}
-
-	go monitorComfyUI(targetStr)
-
-	proxy := httputil.NewSingleHostReverseProxy(targetURL)
-
+func setupMux(proxy *httputil.ReverseProxy) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +51,30 @@ func main() {
 		proxy.ServeHTTP(w, r)
 	})
 
-	fmt.Println("Sidecar listening on :8080, proxying to", targetStr)
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	return mux
+}
+
+func run(addr, targetStr string) error {
+	targetURL, err := url.Parse(targetStr)
+	if err != nil {
+		return err
+	}
+
+	go monitorComfyUI(targetStr)
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	mux := setupMux(proxy)
+
+	fmt.Println("Sidecar listening on", addr, "proxying to", targetStr)
+	return http.ListenAndServe(addr, mux)
+}
+
+func main() {
+	targetStr := os.Getenv("TARGET_URL")
+	if targetStr == "" {
+		targetStr = "http://localhost:8188"
+	}
+	if err := run(":8080", targetStr); err != nil {
 		panic(err)
 	}
 }
