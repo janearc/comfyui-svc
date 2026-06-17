@@ -11,9 +11,7 @@ services:
     ports:
       - "8188:8188"
     environment:
-      - CLI_ARGS=--listen 0.0.0.0 --port 8188 --cpu --enable-cors-header "*"
-    networks:
-      - dev-fleet
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188 --cpu
 
   sidecar:
     build:
@@ -22,14 +20,3 @@ services:
       - "127.0.0.1:8189:8080"
     environment:
       - TARGET_URL=http://comfyui:8188
-    labels:
-      - "fleet.essential=true"
-      - "traefik.enable=true"
-      - "traefik.http.routers.comfyui.rule=Host(`comfyui.localhost`)"
-      - "traefik.http.services.comfyui.loadbalancer.server.port=8080"
-    networks:
-      - dev-fleet
-
-networks:
-  dev-fleet:
-    external: true
