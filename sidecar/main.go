@@ -74,7 +74,11 @@ func main() {
 	if targetStr == "" {
 		targetStr = "http://localhost:8188"
 	}
-	if err := run(":8080", targetStr); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	if err := run(":"+port, targetStr); err != nil {
 		panic(err)
 	}
 }
