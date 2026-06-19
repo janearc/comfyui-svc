@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comfyui
+  namespace: fleet
+  labels:
+    app.kubernetes.io/name: comfyui
+    app.kubernetes.io/part-of: fleet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: comfyui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: comfyui
+        app.kubernetes.io/part-of: fleet
+    spec:
+      containers:
+        - name: comfyui
+          # Built locally from ./Dockerfile by the primary agent and imported via
+          # `k3d image import`. NOT a cached upstream tag — flagged in handoff.
+          image: comfyui-svc-comfyui:fleet
+          imagePullPolicy: Never
+          # CPU mode (no virtualized GPU in-cluster). --listen 0.0.0.0 so the
+          # sidecar in a peer pod can reach the API; CORS open as in compose.
+          env:
+            - name: CLI_ARGS
+              value: "--listen 0.0.0.0 --port 8188 --cpu --enable-cors-header *"
+          ports:
+            - name: http
+              containerPort: 8188
+          readinessProbe:
+            httpGet:
+              path: /system_stats
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /system_stats
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          volumeMounts:
+            # SACRED models tree (~16G). hostPath, read-only — k8s never writes here.
+            - name: comfyui-models
+              mountPath: /comfyui/models
+              readOnly: true
+      volumes:
+        - name: comfyui-models
+          hostPath:
+            path: /Users/jane/work/comfyui/src/ComfyUI/models
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comfyui-sidecar
+  namespace: fleet
+  labels:
+    app.kubernetes.io/name: comfyui-sidecar
+    app.kubernetes.io/part-of: fleet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: comfyui-sidecar
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: comfyui-sidecar
+        app.kubernetes.io/part-of: fleet
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: sidecar
+          # Built locally from ./sidecar/Dockerfile by the primary agent and
+          # imported via `k3d image import`. NOT a cached upstream tag — flagged
+          # in handoff. Must be (re)built from current sidecar/main.go.
+          image: comfyui-svc-sidecar:fleet
+          imagePullPolicy: Never
+          env:
+            # In-cluster the sidecar reaches ComfyUI via its Service DNS name.
+            - name: TARGET_URL
+              value: "http://comfyui:8188"
+            - name: PORT
+              value: "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # Liveness must prove the SIDECAR process is alive, independent of
+            # upstream. /health returns 503 whenever ComfyUI is down, so using it
+            # for liveness would restart a perfectly healthy sidecar while ComfyUI
+            # warms up. /metrics always returns 200 from the sidecar itself, so it
+            # is the correct liveness target; /health stays the readiness target.
+            httpGet:
+              path: /metrics
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"

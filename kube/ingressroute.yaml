@@ -1,0 +1,22 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: comfyui
+  namespace: fleet
+  labels:
+    app.kubernetes.io/name: comfyui
+    app.kubernetes.io/part-of: fleet
+spec:
+  entryPoints:
+    - web                     # TLS terminates at Cloudflare; tunnel forwards :80
+  routes:
+    - kind: Rule
+      # Edge reaches comfyui through the sidecar (health-aware reverse proxy),
+      # never ComfyUI directly. Compose used comfyui.localhost; the kube edge
+      # convention (kube-traefik handoff) is <service>.local.
+      match: Host(`comfyui.local`)
+      services:
+        - kind: Service
+          name: comfyui-sidecar  # == service.yaml sidecar metadata.name
+          port: 8080             # == that Service's spec.ports[].port
+          passHostHeader: true
